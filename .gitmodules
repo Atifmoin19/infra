@@ -5,7 +5,7 @@
 [submodule "render/src/expense"]
 	path = render/src/expense
 	url = https://github.com/Atifmoin19/ExpenseTrackerBE.git
-	branch = revive
+	branch = main
 [submodule "render/src/dayline"]
 	path = render/src/dayline
 	url = https://github.com/Atifmoin19/dayline.git
