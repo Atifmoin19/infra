@@ -1,0 +1,165 @@
+# Render Blueprint: ONE free web service running portfolio, All Square (expense) and Dayline
+# behind an in-container Caddy (see render/). Env vars are prefixed per app
+# (PORTFOLIO__*, EXPENSE__*, DAYLINE__*); each app's launcher strips its own prefix and drops
+# every other app's variables, plus any empty value (so an unset optional key = app default).
+# sync:false keys are prompted for when the Blueprint is created; leave optional ones empty.
+services:
+  - type: web
+    name: fullstackcity-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # ---------------- portfolio  (/portfolio) ----------------
+      - key: PORTFOLIO__ADMIN_ID
+        sync: false
+      - key: PORTFOLIO__ADMIN_PASSWORD_HASH
+        sync: false
+      - key: PORTFOLIO__JWT_SECRET
+        generateValue: true
+      - key: PORTFOLIO__JWT_EXPIRE_MINUTES
+        value: "720"
+      - key: PORTFOLIO__GEMINI_API_KEY
+        sync: false
+      - key: PORTFOLIO__GEMINI_API_KEY_2
+        sync: false
+      - key: PORTFOLIO__GEMINI_MODEL
+        value: "gemini-2.5-flash"
+      # base64 of firebase-service-account.json (base64 -i file | tr -d '\n')
+      - key: PORTFOLIO__FIREBASE_SERVICE_ACCOUNT_B64
+        sync: false
+      - key: PORTFOLIO__ALLOWED_ORIGINS
+        value: "https://portfolio.fullstackcity.in,https://portfolio-henna-three-70.vercel.app"
+      - key: PORTFOLIO__BACKEND_PUBLIC_URL
+        value: "https://fullstackcity-api.onrender.com/portfolio"
+      - key: PORTFOLIO__RESEND_API_KEY
+        sync: false
+      - key: PORTFOLIO__CONTACT_NOTIFY_EMAIL
+        sync: false
+      - key: PORTFOLIO__CONTACT_FROM_EMAIL
+        value: "Atif Moin Portfolio <portfolio@fullstackcity.in>"
+      - key: PORTFOLIO__CONTACT_EMAILS_PER_DAY
+        value: "20"
+      # ---------------- All Square / expense  (/expense) ----------------
+      - key: EXPENSE__DATABASE_URL
+        sync: false
+      - key: EXPENSE__JWT_SECRET
+        generateValue: true
+      - key: EXPENSE__JWT_ACCESS_TTL_MINUTES
+        value: "60"
+      - key: EXPENSE__JWT_REFRESH_TTL_DAYS
+        value: "30"
+      - key: EXPENSE__ENV
+        value: "production"
+      - key: EXPENSE__ALLOWED_ORIGINS
+        value: "https://expense-tracker-fe-xi.vercel.app"
+      - key: EXPENSE__DEMO_MODE_ENABLED
+        value: "true"
+      - key: EXPENSE__DEMO_TTL_HOURS
+        value: "24"
+      - key: EXPENSE__DEMO_RATE_LIMIT_PER_HOUR
+        value: "5"
+      - key: EXPENSE__DEMO_MAX_SESSIONS
+        value: "200"
+      - key: EXPENSE__EMAILJS_SERVICE_ID
+        sync: false
+      - key: EXPENSE__EMAILJS_TEMPLATE_ID
+        sync: false
+      - key: EXPENSE__EMAILJS_PUBLIC_KEY
+        sync: false
+      - key: EXPENSE__EMAILJS_PRIVATE_KEY
+        sync: false
+      - key: EXPENSE__GOOGLE_CLIENT_ID
+        sync: false
+      - key: EXPENSE__GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: EXPENSE__VAPID_PUBLIC_KEY
+        sync: false
+      - key: EXPENSE__VAPID_PRIVATE_KEY
+        sync: false
+      - key: EXPENSE__VAPID_SUBJECT
+        sync: false
+      - key: EXPENSE__AWS_ENDPOINT_URL_S3
+        sync: false
+      - key: EXPENSE__AWS_ACCESS_KEY_ID
+        sync: false
+      - key: EXPENSE__AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: EXPENSE__AWS_REGION
+        sync: false
+      - key: EXPENSE__S3_BUCKET_NAME
+        sync: false
+      # ---------------- Dayline  (/dayline) ----------------
+      # CELERY_ENABLED=false and API_ROOT_PATH=/dayline are fixed by render/bin/start-dayline.sh.
+      - key: DAYLINE__DATABASE_URL
+        sync: false
+      - key: DAYLINE__FRONTEND_ORIGIN
+        sync: false
+      - key: DAYLINE__FRONTEND_APP_URL
+        sync: false
+      - key: DAYLINE__ENVIRONMENT
+        value: "production"
+      - key: DAYLINE__DEMO_MODE_ENABLED
+        value: "true"
+      - key: DAYLINE__DEMO_TTL_HOURS
+        value: "24"
+      - key: DAYLINE__DEMO_MAX_PER_IP_PER_HOUR
+        value: "5"
+      - key: DAYLINE__DEMO_MAX_LIVE_WORKSPACES
+        value: "100"
+      - key: DAYLINE__DEMO_IP_SALT
+        generateValue: true
+      - key: DAYLINE__DEMO_PURGE_INTERVAL_SECONDS
+        value: "3600"
+      - key: DAYLINE__OVERDUE_SWEEP_INTERVAL_SECONDS
+        value: "60"
+      - key: DAYLINE__BUSINESS_TIMEZONE
+        value: "Asia/Kolkata"
+      - key: DAYLINE__BUSINESS_END_HOUR
+        value: "19"
+      - key: DAYLINE__MAX_OPEN_SESSION_HOURS
+        value: "12"
+      - key: DAYLINE__EMAIL_HOST
+        sync: false
+      - key: DAYLINE__EMAIL_PORT
+        sync: false
+      - key: DAYLINE__EMAIL_HOST_USER
+        sync: false
+      - key: DAYLINE__EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DAYLINE__DEFAULT_FROM_EMAIL
+        sync: false
+      - key: DAYLINE__SLACK_WEBHOOK_URL
+        sync: false
+      - key: DAYLINE__VAPID_PRIVATE_KEY
+        sync: false
+      - key: DAYLINE__VAPID_PUBLIC_KEY
+        sync: false
+      - key: DAYLINE__VAPID_CLAIMS_EMAIL
+        sync: false
+      - key: DAYLINE__SENTRY_DSN
+        sync: false
+      - key: DAYLINE__GEMINI_API_KEY
+        sync: false
+      - key: DAYLINE__GEMINI_API_KEY_2
+        sync: false
+      - key: DAYLINE__GEMINI_API_KEY_3
+        sync: false
+      - key: DAYLINE__GEMINI_MODEL
+        sync: false
+      - key: DAYLINE__OIDC_ISSUER
+        sync: false
+      - key: DAYLINE__OIDC_CLIENT_ID
+        sync: false
+      - key: DAYLINE__OIDC_CLIENT_SECRET
+        sync: false
+      - key: DAYLINE__OIDC_REDIRECT_URI
+        sync: false
+      - key: DAYLINE__OIDC_SCOPES
+        sync: false
+      - key: DAYLINE__OIDC_PROVIDER_LABEL
+        sync: false

@@ -1,0 +1,12 @@
+[submodule "render/src/portfolio"]
+	path = render/src/portfolio
+	url = https://github.com/Atifmoin19/NextPortfolio-Backend.git
+	branch = main
+[submodule "render/src/expense"]
+	path = render/src/expense
+	url = https://github.com/Atifmoin19/ExpenseTrackerBE.git
+	branch = revive
+[submodule "render/src/dayline"]
+	path = render/src/dayline
+	url = https://github.com/Atifmoin19/dayline.git
+	branch = master

@@ -1,0 +1,14 @@
+# Build context for render/Dockerfile is the repo root. The Dockerfile copies named paths only;
+# this just keeps secrets and junk out of the context entirely.
+.git
+**/.git
+env/
+secrets/
+backups/
+**/.env
+**/*.env
+**/firebase-service-account*.json
+**/.venv
+**/__pycache__
+**/node_modules
+render/src/dayline/frontend

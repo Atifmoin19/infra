@@ -1,0 +1,50 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	servers {
+		# Render's proxy connects from a private address and APPENDS the real client IP to
+		# X-Forwarded-For. Trust private ranges and parse right-to-left (strict), so the client
+		# IP is the rightmost non-private entry: client-supplied (spoofed) entries to its left
+		# are ignored.
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
+	log {
+		output stdout
+		format json
+		level WARN
+	}
+}
+
+:{$PORT} {
+	# Apps trust only 127.0.0.1 (uvicorn's default --forwarded-allow-ips) and receive exactly
+	# one X-Forwarded-For entry: the client IP Caddy resolved above.
+
+	handle /health {
+		reverse_proxy 127.0.0.1:8099
+	}
+	handle_path /portfolio/* {
+		reverse_proxy 127.0.0.1:8001 {
+			header_up X-Forwarded-For {client_ip}
+			header_up X-Real-IP {client_ip}
+		}
+	}
+	handle_path /expense/* {
+		reverse_proxy 127.0.0.1:8002 {
+			header_up X-Forwarded-For {client_ip}
+			header_up X-Real-IP {client_ip}
+		}
+	}
+	# WebSockets (/dayline/ws) are proxied by reverse_proxy without extra config.
+	handle_path /dayline/* {
+		reverse_proxy 127.0.0.1:8003 {
+			header_up X-Forwarded-For {client_ip}
+			header_up X-Real-IP {client_ip}
+		}
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

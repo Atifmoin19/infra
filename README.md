@@ -1,5 +1,10 @@
 # infra — shared backend server
 
+> **Primary hosting is now one free Render web service.** See [render/DEPLOY.md](render/DEPLOY.md):
+> one image (`render/Dockerfile`, `render.yaml`) runs portfolio, All Square and Dayline under
+> supervisord behind an in-container Caddy, with sources as git submodules in `render/src/`.
+> The Oracle VM stack below is the secondary path.
+
 All backends for fullstackcity.in run as Docker containers on one Oracle Cloud Always Free VM
 (ARM64, Ubuntu) behind Caddy at **api.fullstackcity.in**, routed by path. Frontends live on Vercel.
 
