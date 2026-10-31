@@ -33,7 +33,7 @@ services:
       - key: PORTFOLIO__FIREBASE_SERVICE_ACCOUNT_B64
         sync: false
       - key: PORTFOLIO__ALLOWED_ORIGINS
-        value: "https://portfolio.fullstackcity.in,https://portfolio-henna-three-70.vercel.app"
+        value: "https://portfolio.fullstackcity.in,https://portfolio-henna-three-70.vercel.app,https://dayline-alpha-ten.vercel.app,https://expense-tracker-fe-xi.vercel.app"
       - key: PORTFOLIO__BACKEND_PUBLIC_URL
         value: "https://api.fullstackcity.in/portfolio"
       - key: PORTFOLIO__RESEND_API_KEY
