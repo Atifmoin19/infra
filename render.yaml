@@ -35,7 +35,7 @@ services:
       - key: PORTFOLIO__ALLOWED_ORIGINS
         value: "https://portfolio.fullstackcity.in,https://portfolio-henna-three-70.vercel.app"
       - key: PORTFOLIO__BACKEND_PUBLIC_URL
-        value: "https://fullstackcity-api.onrender.com/portfolio"
+        value: "https://api.fullstackcity.in/portfolio"
       - key: PORTFOLIO__RESEND_API_KEY
         sync: false
       - key: PORTFOLIO__CONTACT_NOTIFY_EMAIL
