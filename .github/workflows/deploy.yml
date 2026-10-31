@@ -1,0 +1,68 @@
+# Deploys one service to the Oracle VM by running scripts/deploy.sh over SSH.
+# Triggers:
+#   - manually (Actions tab -> Deploy -> Run workflow)
+#   - repository_dispatch type "deploy" with client_payload.service, sent by each service
+#     repo on push (snippet in README.md)
+# Secrets: VM_HOST, VM_USER, VM_SSH_KEY (private deploy key), VM_KNOWN_HOSTS
+#   (output of `ssh-keyscan -t ed25519 <host>`; the host key is pinned, never auto-accepted).
+# On the VM the key should be restricted to deploy.sh (forced command), see docs/GO_LIVE.md.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to deploy
+        required: true
+        type: choice
+        options: [portfolio, expense, caddy]
+  repository_dispatch:
+    types: [deploy]
+
+permissions: {}
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Resolve and validate service
+        id: svc
+        env:
+          SERVICE: ${{ github.event.inputs.service || github.event.client_payload.service }}
+        run: |
+          case "$SERVICE" in
+            portfolio|expense|caddy) echo "name=$SERVICE" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::invalid service '$SERVICE'"; exit 1 ;;
+          esac
+
+      - name: Configure SSH (pinned host key)
+        env:
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VM_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy ${{ steps.svc.outputs.name }}
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          SERVICE: ${{ steps.svc.outputs.name }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o IdentitiesOnly=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 \
+              "$VM_USER@$VM_HOST" "deploy $SERVICE"
+
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

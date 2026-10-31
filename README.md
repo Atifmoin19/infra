@@ -54,6 +54,9 @@ only through Caddy.
 
 ## Run in production (VM)
 
+Step-by-step first setup: **[docs/GO_LIVE.md](docs/GO_LIVE.md)**. On the VM, sources live in
+`/srv/src/<service>` and `/srv/infra/.env` (from `.env.vm.example`) points compose at them.
+
 ```sh
 docker compose up -d --build      # uses caddy/Caddyfile -> api.fullstackcity.in
 ```
@@ -83,7 +86,7 @@ to `./backups/<name>/<name>-YYYYmmdd-HHMMSS.dump` (custom format) and deletes du
 `BACKUP_KEEP_DAYS` (7).
 
 ```sh
-docker compose exec backup /bin/sh /backup.sh once            # back up now
+docker compose exec backup /bin/sh /opt/backup/backup.sh once            # back up now
 ls -lh backups/expense/
 docker compose exec -T backup pg_restore --list /backups/expense/<file>.dump   # inspect
 
@@ -107,7 +110,13 @@ service's `networks`.
 - Non-file config goes in `env/<svc>.env` (gitignored). Keep `env/<svc>.env.example` in sync with
   the keys the service reads.
 - Secret files go in `secrets/<svc>/` (gitignored) and are bind-mounted read-only; they are never
-  `COPY`'d into an image. Override Dockerfiles copy only the files they need (e.g. `app/`).
+  `COPY`'d into an image.
+- **No `.env` in images:** the override Dockerfiles never use `COPY . .`. They copy
+  `requirements.txt` and named source directories only (`app/` for portfolio; `main.py`,
+  `alembic*`, `core/`, `models/`, `routers/`, `schemas/`, `services/`, `utils/`, `scripts/`
+  for expense). A `.env` or service-account JSON in a source checkout therefore never reaches an
+  image, whatever that repo's `.dockerignore` says (ExpenseTrackerBE has none). Keep it that way
+  when adding services: list paths explicitly.
 - On Linux the container user must be able to read the mounted file:
   `chmod 644 secrets/portfolio/firebase-service-account.json` (or `chown 10001`).
 - See `secrets/README.md` for the per-service list.
@@ -125,6 +134,42 @@ service's `networks`.
 4. In `caddy/routes.caddy`: add `handle_path /<svc>/* { reverse_proxy <svc>-api:<port> }` above
    the catch-all `handle`.
 5. `CADDYFILE=Caddyfile.local docker compose up -d --build` and `curl http://localhost/<svc>/health`.
+
+## Deploying
+
+- `scripts/bootstrap-vm.sh`: one-time, idempotent VM setup (Docker, deploy user, ufw, fail2ban,
+  unattended-upgrades, swap, log limits, `/srv` layout).
+- `scripts/deploy.sh <portfolio|expense|caddy>`: pulls infra and the service's source (fast-forward
+  only), tags the current image `:prev`, builds, runs `up -d` on that service only, and waits for
+  it to be healthy. If it isn't healthy, it re-tags `:prev` and restarts the service (rollback).
+  A rollback does **not** undo DB migrations.
+- `.github/workflows/deploy.yml`: runs `deploy.sh` over SSH with a pinned host key. The key is
+  restricted on the VM to a forced `deploy.sh --from-ssh` command.
+
+### Auto-deploy from a service repo
+
+Add `.github/workflows/trigger-deploy.yml` to the service repo (use `revive` instead of `main` for
+ExpenseTrackerBE while that branch is the deployed one). It needs a repo secret
+`INFRA_DISPATCH_TOKEN`: a fine-grained PAT with access to **only** the infra repo and
+*Contents: Read and write*.
+
+```yaml
+name: Trigger deploy
+on:
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: gh api repos/Atifmoin19/infra/dispatches -f event_type=deploy -f 'client_payload[service]=expense'
+```
+
+Adding TaskBoard (part 2b) means editing: `svc_lookup` in `deploy.sh`, the `options`/`case` in
+`deploy.yml`, `.env.vm.example`, and the commented clone line in `bootstrap-vm.sh`.
 
 ## Hardening defaults
 

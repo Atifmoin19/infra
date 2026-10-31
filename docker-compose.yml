@@ -26,9 +26,11 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+    # Directory mount (not single files) so `git pull` + `caddy reload` picks up edits;
+    # single-file bind mounts keep pointing at the old inode after git replaces the file.
+    command: ["caddy", "run", "--config", "/etc/caddy/${CADDYFILE:-Caddyfile}", "--adapter", "caddyfile"]
     volumes:
-      - ./caddy/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
-      - ./caddy/routes.caddy:/etc/caddy/routes.caddy:ro
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     read_only: true
@@ -54,9 +56,10 @@ services:
   portfolio-api:
     <<: *hardening
     build:
-      context: ../NextPortfolio/Backend
-      # Override Dockerfile lives in this repo; path is relative to the build context.
-      dockerfile: ../../infra/services/portfolio/Dockerfile
+      # Source checkout + override Dockerfile (relative to the context, or absolute).
+      # Defaults fit the dev Mac layout; the VM sets these in .env (see .env.vm.example).
+      context: ${PORTFOLIO_SRC:-../NextPortfolio/Backend}
+      dockerfile: ${PORTFOLIO_DOCKERFILE:-../../infra/services/portfolio/Dockerfile}
     image: infra/portfolio-api:local
     env_file:
       - ./env/portfolio.env
@@ -81,8 +84,8 @@ services:
   expense-api:
     <<: *hardening
     build:
-      context: ../ExpenseTrackerBE
-      dockerfile: ../infra/services/expense/Dockerfile
+      context: ${EXPENSE_SRC:-../ExpenseTrackerBE}
+      dockerfile: ${EXPENSE_DOCKERFILE:-../infra/services/expense/Dockerfile}
     image: infra/expense-api:local
     env_file:
       - ./env/expense.env
@@ -123,16 +126,16 @@ services:
   # ---------------------------------------------------------------- nightly pg_dump
   # One container dumps every BACKUP_<NAME>_URL in env/backup.env to ./backups/<name>/.
   # To add a DB: add its URL to env/backup.env and its *_net network below.
-  # Run now: docker compose run --rm backup once
+  # Run now: docker compose exec backup /bin/sh /opt/backup/backup.sh once
   backup:
     <<: *hardening
     image: postgres:16-alpine
     user: "70:70"
-    entrypoint: ["/bin/sh", "/backup.sh"]
+    entrypoint: ["/bin/sh", "/opt/backup/backup.sh"]
     env_file:
       - ./env/backup.env
     volumes:
-      - ./backup/backup.sh:/backup.sh:ro
+      - ./backup:/opt/backup:ro
       - ./backups:/backups
     read_only: true
     tmpfs:

@@ -12,7 +12,7 @@ AT="${BACKUP_AT:-21:00}"
 dump_all() {
   rc=0
   for var in $(env | sed -n 's/^\(BACKUP_[A-Z0-9_]*_URL\)=.*/\1/p'); do
-    name=$(echo "$var" | sed 's/^BACKUP_\(.*\)_URL$/\1/' | tr 'A-Z' 'a-z')
+    name=$(echo "$var" | sed 's/^BACKUP_\(.*\)_URL$/\1/' | tr '[:upper:]' '[:lower:]')
     url=$(printenv "$var")
     dir="/backups/$name"
     mkdir -p "$dir"
