@@ -23,7 +23,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     XDG_CONFIG_HOME=/tmp/caddy XDG_DATA_HOME=/tmp/caddy HOME=/tmp \
     PORT=10000
 RUN groupadd -g 10001 app && useradd -u 10001 -g app -M -d /tmp -s /usr/sbin/nologin app
-COPY --from=caddy /usr/bin/caddy /usr/bin/caddy
+COPY --from=caddy /usr/bin/caddy /tmp/caddy-with-caps
+# The official Caddy image grants the binary cap_net_bind_service as a file capability.
+# Render runs containers with no-new-privileges, so exec of a file-capability binary fails
+# with "Operation not permitted". We bind $PORT (>1024), so drop it: a plain cp does not
+# carry the security.capability xattr. procps provides `ps` for supervisord's memmon.
+RUN cp /tmp/caddy-with-caps /usr/bin/caddy && rm /tmp/caddy-with-caps && chmod 755 /usr/bin/caddy \
+ && apt-get update && apt-get install -y --no-install-recommends procps \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt /opt
 
 # Named source paths only: never `COPY .`, so no .env / service-account file can get in.
