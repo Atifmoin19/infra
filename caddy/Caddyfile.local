@@ -1,0 +1,9 @@
+{
+	auto_https off
+}
+
+import /etc/caddy/routes.caddy
+
+http://localhost {
+	import api_routes
+}

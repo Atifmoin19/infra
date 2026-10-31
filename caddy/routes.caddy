@@ -1,0 +1,17 @@
+# Shared path-based routing, imported by both Caddyfile (prod) and Caddyfile.local.
+# handle_path strips the prefix, so each backend sees "/health", not "/portfolio/health".
+(api_routes) {
+	encode zstd gzip
+
+	handle_path /portfolio/* {
+		reverse_proxy portfolio-api:8000
+	}
+
+	# Future services (part 2/3):
+	# handle_path /expense/*  { reverse_proxy expense-api:8000 }
+	# handle_path /taskboard/* { reverse_proxy taskboard-api:8000 }
+
+	handle {
+		respond "Not found" 404
+	}
+}

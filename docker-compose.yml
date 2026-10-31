@@ -1,0 +1,86 @@
+# Shared backend server: Caddy (only public entrypoint) + one container per backend.
+# Local:  CADDYFILE=Caddyfile.local docker compose up -d --build   (see README)
+# Prod:   docker compose up -d --build
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  caddy:
+    <<: *hardening
+    build:
+      context: ./caddy
+    image: infra/caddy:local
+    cap_add:
+      - NET_BIND_SERVICE
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ./caddy/routes.caddy:/etc/caddy/routes.caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - edge
+      - portfolio_net
+    depends_on:
+      portfolio-api:
+        condition: service_started
+
+  portfolio-api:
+    <<: *hardening
+    build:
+      context: ../NextPortfolio/Backend
+      # Override Dockerfile lives in this repo; path is relative to the build context.
+      dockerfile: ../../infra/services/portfolio/Dockerfile
+    image: infra/portfolio-api:local
+    env_file:
+      - ./env/portfolio.env
+    environment:
+      FIREBASE_SERVICE_ACCOUNT_PATH: /run/secrets/firebase-service-account.json
+    volumes:
+      - type: bind
+        source: ./secrets/portfolio/firebase-service-account.json
+        target: /run/secrets/firebase-service-account.json
+        read_only: true
+        bind:
+          create_host_path: false   # fail loudly if the secret is missing
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 384m
+    # no `ports:` - reachable only via Caddy on portfolio_net
+    networks:
+      - portfolio_net
+
+networks:
+  # Caddy's public-facing network.
+  edge:
+  # One network per backend: Caddy joins all of them, backends can't reach each other.
+  # Not `internal: true` because the API needs outbound internet (Firestore, Gemini, Resend).
+  portfolio_net:
+
+volumes:
+  caddy_data:
+  caddy_config:

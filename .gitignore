@@ -1,0 +1,12 @@
+# Real env files (only *.env.example is committed)
+env/*.env
+!env/*.env.example
+.env
+
+# Secrets (service-account JSON, keys, etc.) - mounted at runtime, never committed
+secrets/**
+!secrets/README.md
+!secrets/*/
+!secrets/*/.gitkeep
+
+.DS_Store

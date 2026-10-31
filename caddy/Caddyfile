@@ -1,0 +1,7 @@
+# Production: automatic HTTPS via Let's Encrypt for api.fullstackcity.in.
+# (Optionally add a global block `{ email you@example.com }` for ACME expiry notices.)
+import /etc/caddy/routes.caddy
+
+api.fullstackcity.in {
+	import api_routes
+}
