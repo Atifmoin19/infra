@@ -16,8 +16,13 @@
 		}
 	}
 
-	# Future services:
-	# handle_path /taskboard/* { reverse_proxy taskboard-api:8000 }
+	# Dayline (formerly TaskBoard). WebSocket upgrades (/dayline/ws) are proxied by
+	# reverse_proxy automatically; no extra config needed.
+	handle_path /dayline/* {
+		reverse_proxy dayline-api:8000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
 	handle {
 		respond "Not found" 404

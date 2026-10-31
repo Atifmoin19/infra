@@ -15,7 +15,7 @@ on:
         description: Service to deploy
         required: true
         type: choice
-        options: [portfolio, expense, caddy]
+        options: [portfolio, expense, dayline, caddy]
   repository_dispatch:
     types: [deploy]
 
@@ -37,7 +37,7 @@ jobs:
           SERVICE: ${{ github.event.inputs.service || github.event.client_payload.service }}
         run: |
           case "$SERVICE" in
-            portfolio|expense|caddy) echo "name=$SERVICE" >> "$GITHUB_OUTPUT" ;;
+            portfolio|expense|dayline|caddy) echo "name=$SERVICE" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::invalid service '$SERVICE'"; exit 1 ;;
           esac
 

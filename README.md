@@ -7,7 +7,7 @@ All backends for fullstackcity.in run as Docker containers on one Oracle Cloud A
 |---------------|------------------|------------------------------------------|
 | `/portfolio/` | `portfolio-api`  | `../NextPortfolio/Backend` (FastAPI)     |
 | `/expense/`   | `expense-api`    | `../ExpenseTrackerBE` (All Square, FastAPI + Postgres 16 `expense-db`) |
-| `/taskboard/` | _todo (part 3)_  |                                          |
+| `/dayline/`   | `dayline-api` (+ `dayline-worker`, `dayline-beat`) | `../taskboard/backend` (Dayline, FastAPI + Celery + Postgres 16 `dayline-db` + Redis 7 `dayline-redis`) |
 
 Caddy uses `handle_path`, which strips the prefix: `GET /portfolio/health` reaches the app as
 `GET /health`. App code is unchanged; uvicorn runs with `--root-path /portfolio` so `/docs`
@@ -30,6 +30,7 @@ infra/                         # this repo; source repos are checked out as sibl
   backups/<db>/                # dumps, gitignored
 ../NextPortfolio/Backend       # build context for portfolio-api
 ../ExpenseTrackerBE            # build context for expense-api (branch `revive`)
+../taskboard/backend           # build context for the dayline-* image (branch `master`)
 ```
 
 The build contexts are relative (`../NextPortfolio/Backend`), so on the VM clone the source
@@ -43,9 +44,11 @@ cp /path/to/firebase-service-account.json secrets/portfolio/
 cp env/expense.env.example env/expense.env              # DB password must match the next two
 cp env/expense-db.env.example env/expense-db.env
 cp env/backup.env.example env/backup.env
+for f in dayline dayline-db dayline-redis; do cp env/$f.env.example env/$f.env; done   # passwords must match
 CADDYFILE=Caddyfile.local docker compose up -d --build
 curl -i http://localhost/portfolio/health             # HTTP/1.1 200 OK {"status":"ok"}
 curl -i http://localhost/expense/health               # HTTP/1.1 200 OK
+curl -i http://localhost/dayline/health               # HTTP/1.1 200 OK
 docker compose down
 ```
 
@@ -78,6 +81,23 @@ Certificates persist in the `caddy_data` volume.
 - `POSTGRES_PASSWORD` only applies when the volume is first created. To rotate it later, run
   `ALTER ROLE` inside the DB and update `env/expense.env` and `env/backup.env`.
 
+## Dayline (formerly TaskBoard)
+
+- One image (`services/dayline/Dockerfile`, built by `dayline-api`) runs three ways:
+  - `dayline-api` runs `alembic upgrade head`, then uvicorn. Its root path comes from
+    `API_ROOT_PATH=/dayline`.
+  - `dayline-worker` is the Celery worker with `--concurrency=2`.
+  - `dayline-beat` is Celery Beat. Its schedule file is on tmpfs at `/tmp/celerybeat-schedule`.
+- `dayline-db` (Postgres 16) and `dayline-redis` (Redis 7 with a password, AOF on a volume so
+  sessions survive restarts, `noeviction`) are only on `dayline_net` (`internal: true`).
+  The API also joins `dayline_edge` (Caddy plus internet). The worker also joins
+  `dayline_egress` (internet for email/Slack/push; Caddy is not on it). Beat has no internet.
+- WebSockets (`/dayline/ws`) work through Caddy's `reverse_proxy` without extra config.
+- Leave unused optional keys in `env/dayline.env` **commented out**. The app uses
+  `os.getenv(key, default)`, so an empty `KEY=` overrides the default, and `EMAIL_PORT=`
+  crashes on startup.
+- Memory limits add up to 688m. Idle use is about 310 MiB.
+
 ## Backups
 
 The `backup` service (postgres:16-alpine, so `pg_dump` matches the server version) dumps every
@@ -101,9 +121,8 @@ On the Linux VM, the container runs as uid 70, so: `sudo chown -R 70:70 backups/
 Copy `backups/` off the VM too (e.g. rclone to object storage); a dump on the same disk
 doesn't help if the VM is lost.
 
-Adding a DB (e.g. taskboard): add `BACKUP_TASKBOARD_URL=...@taskboard-db:5432/...` to
-`env/backup.env`, `touch backups/taskboard/.gitkeep`, and add `taskboard_net` to the `backup`
-service's `networks`.
+Adding a DB: add `BACKUP_<NAME>_URL=...` to `env/backup.env`, `touch backups/<name>/.gitkeep`,
+and add the DB's `<name>_net` to the `backup` service's `networks` (as done for `dayline`).
 
 ## Secrets and env
 
@@ -114,7 +133,7 @@ service's `networks`.
 - **No `.env` in images:** the override Dockerfiles never use `COPY . .`. They copy
   `requirements.txt` and named source directories only (`app/` for portfolio; `main.py`,
   `alembic*`, `core/`, `models/`, `routers/`, `schemas/`, `services/`, `utils/`, `scripts/`
-  for expense). A `.env` or service-account JSON in a source checkout therefore never reaches an
+  for expense; `*.py`, `alembic*`, `seed/` for dayline). A `.env` or service-account JSON in a source checkout therefore never reaches an
   image, whatever that repo's `.dockerignore` says (ExpenseTrackerBE has none). Keep it that way
   when adding services: list paths explicitly.
 - On Linux the container user must be able to read the mounted file:
@@ -139,7 +158,7 @@ service's `networks`.
 
 - `scripts/bootstrap-vm.sh`: one-time, idempotent VM setup (Docker, deploy user, ufw, fail2ban,
   unattended-upgrades, swap, log limits, `/srv` layout).
-- `scripts/deploy.sh <portfolio|expense|caddy>`: pulls infra and the service's source (fast-forward
+- `scripts/deploy.sh <portfolio|expense|dayline|caddy>`: pulls infra and the service's source (fast-forward
   only), tags the current image `:prev`, builds, runs `up -d` on that service only, and waits for
   it to be healthy. If it isn't healthy, it re-tags `:prev` and restarts the service (rollback).
   A rollback does **not** undo DB migrations.
@@ -168,8 +187,9 @@ jobs:
         run: gh api repos/Atifmoin19/infra/dispatches -f event_type=deploy -f 'client_payload[service]=expense'
 ```
 
-Adding TaskBoard (part 2b) means editing: `svc_lookup` in `deploy.sh`, the `options`/`case` in
-`deploy.yml`, `.env.vm.example`, and the commented clone line in `bootstrap-vm.sh`.
+Adding another service means editing: `svc_lookup` in `deploy.sh`, the `options`/`case` in
+`deploy.yml`, `.env.vm.example`, and a clone line in `bootstrap-vm.sh`. For Dayline, use
+`client_payload[service]=dayline` and branch `master` in its trigger snippet.
 
 ## Hardening defaults
 

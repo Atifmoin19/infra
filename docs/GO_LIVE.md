@@ -52,7 +52,7 @@ Public repos can use `https://github.com/...` URLs directly. For private repos, 
 its own **read-only deploy key** (GitHub allows one key per repo):
 
 ```sh
-vm$ for r in infra portfolio expense; do ssh-keygen -t ed25519 -N '' -C "vm-$r" -f ~/.ssh/gh_$r; done
+vm$ for r in infra portfolio expense dayline; do ssh-keygen -t ed25519 -N '' -C "vm-$r" -f ~/.ssh/gh_$r; done
 vm$ cat >> ~/.ssh/config <<'CFG'
 Host gh-infra
   HostName github.com
@@ -63,6 +63,9 @@ Host gh-portfolio
 Host gh-expense
   HostName github.com
   IdentityFile ~/.ssh/gh_expense
+Host gh-dayline
+  HostName github.com
+  IdentityFile ~/.ssh/gh_dayline
 CFG
 vm$ cat ~/.ssh/gh_*.pub   # add each to its repo: Settings > Deploy keys (read-only)
 vm$ ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -72,7 +75,8 @@ vm$ ssh-keyscan github.com >> ~/.ssh/known_hosts
 vm$ git clone git@gh-infra:Atifmoin19/infra.git /srv/infra
 vm$ git clone git@gh-portfolio:Atifmoin19/NextPortfolio-Backend.git /srv/src/portfolio
 vm$ git clone -b revive git@gh-expense:Atifmoin19/ExpenseTrackerBE.git /srv/src/expense
-vm$ sudo install -d -o 70 -g 70 /srv/infra/backups /srv/infra/backups/expense   # backup runs as uid 70
+vm$ git clone -b master git@gh-dayline:Atifmoin19/<dayline-repo>.git /srv/src/dayline   # repo root; the API is in backend/
+vm$ sudo install -d -o 70 -g 70 /srv/infra/backups /srv/infra/backups/expense /srv/infra/backups/dayline   # backup runs as uid 70
 ```
 
 ## 6. Env files and secrets
@@ -80,7 +84,7 @@ vm$ sudo install -d -o 70 -g 70 /srv/infra/backups /srv/infra/backups/expense   
 ```sh
 vm$ cd /srv/infra
 vm$ cp .env.vm.example .env                      # compose paths + prod Caddyfile
-vm$ for f in portfolio expense expense-db backup; do cp env/$f.env.example env/$f.env; done
+vm$ for f in portfolio expense expense-db dayline dayline-db dayline-redis backup; do cp env/$f.env.example env/$f.env; done
 vm$ chmod 600 env/*.env
 ```
 
@@ -99,7 +103,10 @@ vm$ docker run --rm python:3.12-slim sh -c "pip -q install passlib bcrypt==4.0.1
 | `env/portfolio.env` | `ADMIN_ID`, `ADMIN_PASSWORD_HASH`, `JWT_SECRET`, `GEMINI_API_KEY` (+`_2`), `RESEND_API_KEY`, `CONTACT_NOTIFY_EMAIL`, `CONTACT_FROM_EMAIL`; keep `BACKEND_PUBLIC_URL=https://api.fullstackcity.in/portfolio`; `ALLOWED_ORIGINS` (see section 9) |
 | `env/expense-db.env` | `POSTGRES_PASSWORD` = the DB password |
 | `env/expense.env` | `DATABASE_URL=postgresql://expense:<DB password>@expense-db:5432/expense`, `JWT_SECRET`, `ENV=production`, `ALLOWED_ORIGINS`, `DEMO_MODE_ENABLED=true`. Optional: EmailJS, Google, VAPID (reuse the **same** VAPID keys as today or existing push subscriptions break), S3 |
-| `env/backup.env` | `BACKUP_EXPENSE_URL` = same URL as `DATABASE_URL` |
+| `env/dayline-db.env` | `POSTGRES_PASSWORD` = a second DB password |
+| `env/dayline-redis.env` | `REDIS_PASSWORD` = `openssl rand -hex 24` |
+| `env/dayline.env` | `DATABASE_URL=postgresql://dayline:<DB password>@dayline-db:5432/dayline`, `REDIS_PASSWORD` (same as above), `FRONTEND_ORIGIN`, `FRONTEND_APP_URL`, `ENVIRONMENT=production`, `DEMO_MODE_ENABLED=true`, `DEMO_IP_SALT` (`openssl rand -hex 32`). Optional: SMTP, Slack, VAPID, Sentry, Gemini, OIDC. **Leave unused keys commented out, not blank** (`EMAIL_PORT=` crashes the app) |
+| `env/backup.env` | `BACKUP_EXPENSE_URL` = expense `DATABASE_URL`; `BACKUP_DAYLINE_URL` = dayline `DATABASE_URL` |
 
 Copy the Firebase service-account file from your Mac:
 
@@ -131,6 +138,8 @@ vm$ docker compose logs -f caddy       # watch for "certificate obtained success
 $ curl -i https://api.fullstackcity.in/portfolio/health   # 200 {"status":"ok"}
 $ curl -i https://api.fullstackcity.in/expense/health     # 200 {"status":"ok","env":"production"}
 $ curl -s -X POST https://api.fullstackcity.in/expense/api/v1/auth/demo | head -c 120
+$ curl -i https://api.fullstackcity.in/dayline/health      # 200 {"status":"healthy","db":true}
+vm$ docker compose exec dayline-worker celery -A celery_app.celery_app inspect ping   # -> pong
 vm$ docker compose exec backup /bin/sh /opt/backup/backup.sh once && ls -lh backups/expense
 ```
 
@@ -150,6 +159,15 @@ VITE_GOOGLE_CLIENT_ID=<same as backend GOOGLE_CLIENT_ID, or blank>
 VITE_VAPID_PUBLIC_KEY=<same as backend VAPID_PUBLIC_KEY, or blank>
 ```
 
+**Dayline** (`taskboard/frontend`). The WebSocket URL is derived from this value (`wss://.../dayline/ws`), so there is no separate variable:
+```
+VITE_APP_BASE_URL=https://api.fullstackcity.in/dayline
+VITE_APP_ENV=PROD
+VITE_DEMO_ENABLED=true
+VITE_BUSINESS_TZ=Asia/Kolkata
+VITE_GITHUB_URL=https://github.com/Atifmoin19
+```
+
 **CORS on the API side.** Use exact origins, comma-separated, with no trailing slash. Include
 every domain the browser actually loads the app from, such as custom domains or
 `*.vercel.app` production URLs (preview URLs change on every deploy, so add one only to test it):
@@ -158,8 +176,11 @@ every domain the browser actually loads the app from, such as custom domains or
 ALLOWED_ORIGINS=https://portfolio.fullstackcity.in,https://portfolio-henna-three-70.vercel.app
 # env/expense.env
 ALLOWED_ORIGINS=https://expense-tracker-fe-xi.vercel.app
+# env/dayline.env (localhost is always allowed by the app)
+FRONTEND_ORIGIN=https://<dayline-frontend>.vercel.app
+FRONTEND_APP_URL=https://<dayline-frontend>.vercel.app/
 ```
-After changing these, run `vm$ docker compose up -d portfolio-api expense-api`. Env changes need
+After changing these, run `vm$ docker compose up -d portfolio-api expense-api dayline-api dayline-worker dayline-beat`. Env changes need
 `up -d`, not just a restart.
 
 ## 10. GitHub Actions deploys
@@ -183,7 +204,7 @@ After changing these, run `vm$ docker compose up -d portfolio-api expense-api`. 
 6. To deploy automatically on push from each service repo, see "Auto-deploy from a service repo"
    in `README.md`.
 
-To deploy by hand on the VM, run `vm$ /srv/infra/scripts/deploy.sh expense`. It pulls the
+To deploy by hand on the VM, run `vm$ /srv/infra/scripts/deploy.sh expense` (or `portfolio`, `dayline`, `caddy`; `dayline` redeploys the api, worker and beat together). It pulls the
 latest code, builds, waits for the service to be healthy, and rolls back to the previous image
 if it isn't.
 

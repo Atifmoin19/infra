@@ -6,6 +6,7 @@
 #   INFRA_REPO=git@github.com:you/infra.git           cloned to /srv/infra
 #   PORTFOLIO_REPO=... PORTFOLIO_BRANCH=main            cloned to /srv/src/portfolio
 #   EXPENSE_REPO=...   EXPENSE_BRANCH=revive            cloned to /srv/src/expense
+#   DAYLINE_REPO=...   DAYLINE_BRANCH=master            cloned to /srv/src/dayline (backend/ subdir)
 #   SWAP_SIZE=2G
 # Safe to re-run: every step checks before changing anything.
 set -euo pipefail
@@ -125,9 +126,9 @@ clone() { # url dir [branch]
 clone "${INFRA_REPO:-}" /srv/infra
 clone "${PORTFOLIO_REPO:-}" /srv/src/portfolio "${PORTFOLIO_BRANCH:-main}"
 clone "${EXPENSE_REPO:-}" /srv/src/expense "${EXPENSE_BRANCH:-revive}"
-# clone "${TASKBOARD_REPO:-}" /srv/src/taskboard "${TASKBOARD_BRANCH:-main}"   # part 2b
+clone "${DAYLINE_REPO:-}" /srv/src/dayline "${DAYLINE_BRANCH:-master}"
 if [ -d /srv/infra ]; then
-  install -d -o 70 -g 70 /srv/infra/backups /srv/infra/backups/expense
+  install -d -o 70 -g 70 /srv/infra/backups /srv/infra/backups/expense /srv/infra/backups/dayline
 fi
 
 log "Done"

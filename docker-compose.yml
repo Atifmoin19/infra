@@ -47,10 +47,13 @@ services:
       - edge
       - portfolio_net
       - expense_edge
+      - dayline_edge
     depends_on:
       portfolio-api:
         condition: service_started
       expense-api:
+        condition: service_started
+      dayline-api:
         condition: service_started
 
   portfolio-api:
@@ -151,6 +154,124 @@ services:
         condition: service_healthy
     networks:
       - expense_net
+      - dayline_net
+
+  # ---------------------------------------------------------------- dayline (formerly TaskBoard)
+  # One image (built by dayline-api) runs as api, Celery worker and Celery Beat.
+  # Memory limits total 688m (api 192, worker 192, beat 96, db 144, redis 64); idle use ~310 MiB.
+  # The worker keeps headroom for its `celery inspect ping` healthcheck (a second python process).
+  dayline-api:
+    <<: *hardening
+    build:
+      context: ${DAYLINE_SRC:-../taskboard/backend}
+      dockerfile: ${DAYLINE_DOCKERFILE:-../../infra/services/dayline/Dockerfile}
+    image: infra/dayline-api:local
+    env_file:
+      - ./env/dayline.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 192m
+    depends_on:
+      dayline-db:
+        condition: service_healthy
+      dayline-redis:
+        condition: service_healthy
+    networks:
+      - dayline_net    # db + redis (internal)
+      - dayline_edge   # Caddy + outbound internet
+
+  dayline-worker:
+    <<: *hardening
+    image: infra/dayline-api:local
+    pull_policy: never   # built by dayline-api
+    command: ["celery", "-A", "celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=2"]
+    env_file:
+      - ./env/dayline.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 192m
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      dayline-api:          # api runs the migrations first
+        condition: service_healthy
+    networks:
+      - dayline_net
+      - dayline_egress # email / Slack / web push; not reachable by Caddy
+
+  dayline-beat:
+    <<: *hardening
+    image: infra/dayline-api:local
+    pull_policy: never
+    # Schedule state on tmpfs: losing it on restart only means the next run fires on time anyway.
+    command: ["celery", "-A", "celery_app.celery_app", "beat", "--loglevel=info", "--schedule=/tmp/celerybeat-schedule", "--pidfile="]
+    env_file:
+      - ./env/dayline.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 96m
+    healthcheck:
+      test: ["CMD-SHELL", "ls /tmp/celerybeat-schedule* >/dev/null 2>&1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      dayline-api:
+        condition: service_healthy
+    networks:
+      - dayline_net
+
+  dayline-db:
+    <<: *hardening
+    image: postgres:16-alpine
+    user: "70:70"
+    env_file:
+      - ./env/dayline-db.env
+    volumes:
+      - dayline_db_data:/var/lib/postgresql/data
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    shm_size: 64m
+    mem_limit: 144m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - dayline_net
+
+  dayline-redis:
+    <<: *hardening
+    image: redis:7-alpine
+    user: "999:1000"   # redis user in the image
+    env_file:
+      - ./env/dayline-redis.env
+    # Holds login sessions + the Celery queue, so keep an AOF on a volume: a restart
+    # must not log everyone out. noeviction: never silently drop sessions/tasks.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --appendfsync everysec --save '' --maxmemory 48mb --maxmemory-policy noeviction"]
+    volumes:
+      - dayline_redis_data:/data
+    read_only: true
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dayline_net
 
 networks:
   # Caddy's public-facing network.
@@ -163,8 +284,15 @@ networks:
     internal: true
   # Caddy <-> expense-api, also the API's route to the internet.
   expense_edge:
+  dayline_net:
+    internal: true
+  dayline_edge:
+  # Worker egress only (Caddy is not on it).
+  dayline_egress:
 
 volumes:
   caddy_data:
   caddy_config:
   expense_db_data:
+  dayline_db_data:
+  dayline_redis_data:
