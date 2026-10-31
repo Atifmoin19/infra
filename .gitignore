@@ -10,3 +10,8 @@ secrets/**
 !secrets/*/.gitkeep
 
 .DS_Store
+
+# Database dumps (host-mounted backup target)
+backups/**
+!backups/*/
+!backups/*/.gitkeep

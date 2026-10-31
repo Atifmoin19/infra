@@ -44,8 +44,11 @@ services:
     networks:
       - edge
       - portfolio_net
+      - expense_edge
     depends_on:
       portfolio-api:
+        condition: service_started
+      expense-api:
         condition: service_started
 
   portfolio-api:
@@ -74,13 +77,91 @@ services:
     networks:
       - portfolio_net
 
+  # ---------------------------------------------------------------- expense (All Square)
+  expense-api:
+    <<: *hardening
+    build:
+      context: ../ExpenseTrackerBE
+      dockerfile: ../infra/services/expense/Dockerfile
+    image: infra/expense-api:local
+    env_file:
+      - ./env/expense.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 384m
+    depends_on:
+      expense-db:
+        condition: service_healthy
+    networks:
+      - expense_net    # db (internal)
+      - expense_edge   # Caddy + outbound internet (EmailJS, Google, S3)
+
+  expense-db:
+    <<: *hardening
+    image: postgres:16-alpine
+    user: "70:70"      # postgres user in the alpine image; skips the root entrypoint path
+    env_file:
+      - ./env/expense-db.env
+    volumes:
+      - expense_db_data:/var/lib/postgresql/data
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql
+    shm_size: 128m
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - expense_net
+
+  # ---------------------------------------------------------------- nightly pg_dump
+  # One container dumps every BACKUP_<NAME>_URL in env/backup.env to ./backups/<name>/.
+  # To add a DB: add its URL to env/backup.env and its *_net network below.
+  # Run now: docker compose run --rm backup once
+  backup:
+    <<: *hardening
+    image: postgres:16-alpine
+    user: "70:70"
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    env_file:
+      - ./env/backup.env
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f backup.sh >/dev/null"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      expense-db:
+        condition: service_healthy
+    networks:
+      - expense_net
+
 networks:
   # Caddy's public-facing network.
   edge:
   # One network per backend: Caddy joins all of them, backends can't reach each other.
   # Not `internal: true` because the API needs outbound internet (Firestore, Gemini, Resend).
   portfolio_net:
+  # Postgres + its API (+ backup). internal: no internet, and Caddy/other services can't join it.
+  expense_net:
+    internal: true
+  # Caddy <-> expense-api, also the API's route to the internet.
+  expense_edge:
 
 volumes:
   caddy_data:
   caddy_config:
+  expense_db_data:

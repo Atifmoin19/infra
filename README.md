@@ -6,7 +6,7 @@ All backends for fullstackcity.in run as Docker containers on one Oracle Cloud A
 | Path          | Service          | Source                                   |
 |---------------|------------------|------------------------------------------|
 | `/portfolio/` | `portfolio-api`  | `../NextPortfolio/Backend` (FastAPI)     |
-| `/expense/`   | _todo (part 2)_  |                                          |
+| `/expense/`   | `expense-api`    | `../ExpenseTrackerBE` (All Square, FastAPI + Postgres 16 `expense-db`) |
 | `/taskboard/` | _todo (part 3)_  |                                          |
 
 Caddy uses `handle_path`, which strips the prefix: `GET /portfolio/health` reaches the app as
@@ -26,7 +26,10 @@ infra/                         # this repo; source repos are checked out as sibl
   env/<svc>.env.example        # committed, placeholder keys only
   env/<svc>.env                # real values, gitignored
   secrets/<svc>/...            # secret files, gitignored, bind-mounted read-only
+  backup/backup.sh             # nightly pg_dump loop used by the `backup` service
+  backups/<db>/                # dumps, gitignored
 ../NextPortfolio/Backend       # build context for portfolio-api
+../ExpenseTrackerBE            # build context for expense-api (branch `revive`)
 ```
 
 The build contexts are relative (`../NextPortfolio/Backend`), so on the VM clone the source
@@ -37,8 +40,12 @@ repos next to `infra/` with the same directory names.
 ```sh
 cp env/portfolio.env.example env/portfolio.env        # fill in values
 cp /path/to/firebase-service-account.json secrets/portfolio/
+cp env/expense.env.example env/expense.env              # DB password must match the next two
+cp env/expense-db.env.example env/expense-db.env
+cp env/backup.env.example env/backup.env
 CADDYFILE=Caddyfile.local docker compose up -d --build
 curl -i http://localhost/portfolio/health             # HTTP/1.1 200 OK {"status":"ok"}
+curl -i http://localhost/expense/health               # HTTP/1.1 200 OK
 docker compose down
 ```
 
@@ -54,6 +61,46 @@ docker compose up -d --build      # uses caddy/Caddyfile -> api.fullstackcity.in
 DNS `A api.fullstackcity.in -> <VM public IP>` must exist and ports 80/443 must be open in both the
 OCI security list and the VM firewall (iptables/ufw) before Caddy can get a certificate.
 Certificates persist in the `caddy_data` volume.
+
+## Expense (All Square)
+
+- `expense-api` runs `alembic upgrade head` on every start, then uvicorn with
+  `--root-path /expense`. Set `DEMO_MODE_ENABLED=true` to enable `POST /expense/api/v1/auth/demo`.
+- `expense-db` (postgres:16-alpine, non-root, volume `expense_db_data`) is only on `expense_net`
+  (`internal: true`): no internet, and only `expense-api` and `backup` can reach it. The API
+  reaches Caddy and the internet via `expense_edge`.
+- Client IP: Caddy overwrites `X-Forwarded-For` with the real peer address (client-supplied values
+  are dropped), and uvicorn `--proxy-headers` maps it to `request.client.host`, so the per-IP demo
+  limit counts real visitors, not Caddy.
+- `POSTGRES_PASSWORD` only applies when the volume is first created. To rotate it later, run
+  `ALTER ROLE` inside the DB and update `env/expense.env` and `env/backup.env`.
+
+## Backups
+
+The `backup` service (postgres:16-alpine, so `pg_dump` matches the server version) dumps every
+`BACKUP_<NAME>_URL` in `env/backup.env` daily at `BACKUP_AT` (UTC; default 21:00 = 02:30 IST)
+to `./backups/<name>/<name>-YYYYmmdd-HHMMSS.dump` (custom format) and deletes dumps older than
+`BACKUP_KEEP_DAYS` (7).
+
+```sh
+docker compose exec backup /bin/sh /backup.sh once            # back up now
+ls -lh backups/expense/
+docker compose exec -T backup pg_restore --list /backups/expense/<file>.dump   # inspect
+
+# Restore (replaces existing objects). Stop the API first so nothing writes meanwhile.
+docker compose stop expense-api
+docker compose exec -T expense-db sh -c 'pg_restore --clean --if-exists --no-owner \
+  -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < backups/expense/<file>.dump
+docker compose start expense-api
+```
+
+On the Linux VM, the container runs as uid 70, so: `sudo chown -R 70:70 backups/`.
+Copy `backups/` off the VM too (e.g. rclone to object storage); a dump on the same disk
+doesn't help if the VM is lost.
+
+Adding a DB (e.g. taskboard): add `BACKUP_TASKBOARD_URL=...@taskboard-db:5432/...` to
+`env/backup.env`, `touch backups/taskboard/.gitkeep`, and add `taskboard_net` to the `backup`
+service's `networks`.
 
 ## Secrets and env
 
@@ -73,7 +120,8 @@ Certificates persist in the `caddy_data` volume.
    it needs secret files.
 3. In `docker-compose.yml`: add the service (use `<<: *hardening`, `mem_limit`, `read_only`,
    a `healthcheck` if the image lacks one, **no `ports:`**), a new `<svc>_net` network, and add
-   that network to `caddy`.
+   that network to `caddy`. If it has a database, follow the expense pattern: the DB only on an
+   `internal: true` `<svc>_net`, and the API also on a `<svc>_edge` shared with Caddy.
 4. In `caddy/routes.caddy`: add `handle_path /<svc>/* { reverse_proxy <svc>-api:<port> }` above
    the catch-all `handle`.
 5. `CADDYFILE=Caddyfile.local docker compose up -d --build` and `curl http://localhost/<svc>/health`.

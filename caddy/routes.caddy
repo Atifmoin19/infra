@@ -7,8 +7,16 @@
 		reverse_proxy portfolio-api:8000
 	}
 
-	# Future services (part 2/3):
-	# handle_path /expense/*  { reverse_proxy expense-api:8000 }
+	# Caddy sets X-Forwarded-For to the real client IP (discarding any client-supplied value,
+	# since no trusted_proxies are configured); uvicorn --proxy-headers turns it into
+	# request.client.host, which the per-IP demo/rate limits use. X-Real-IP is extra.
+	handle_path /expense/* {
+		reverse_proxy expense-api:8000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Future services:
 	# handle_path /taskboard/* { reverse_proxy taskboard-api:8000 }
 
 	handle {
